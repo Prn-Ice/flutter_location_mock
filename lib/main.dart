@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:location/location.dart';
+import /* 'web_location.dart' if(dart.library.html)  */ 'dart:js' as js;
 
 void main() {
   runApp(const MyApp());
@@ -76,12 +78,14 @@ class _MyHomePageState extends State<MyHomePage> {
               children: [
                 ElevatedButton(
                   onPressed: () async {
-                    final location = await _determinePosition(locationService);
+                    /* final location = await _determinePosition(locationService);
                     print('position is $location');
                     setState(() {
                       latitude = location.latitude;
                       longitude = location.longitude;
-                    });
+                    }); */
+
+                    fetchLocation();
                   },
                   child: const Text('Get Location'),
                 ),
@@ -128,6 +132,31 @@ class _MyHomePageState extends State<MyHomePage> {
         ),
       ),
     );
+  }
+
+  // Function to call JavaScript from Dart
+  void fetchLocation() {
+    // Define a callback function to handle the location from JavaScript
+    js.context['receiveLocationFromJS'] = (position) {
+      // Handle the location received from JavaScript
+      print('Location from JavaScript: $position');
+    };
+
+    // Call the JavaScript function and pass the callback
+    js.context.callMethod('getLocation', [js.allowInterop(receiveLocation)]);
+  }
+
+  // Callback function to handle the location from JavaScript
+  void receiveLocation(js.JsObject position) {
+    // Handle the location received from JavaScript
+    double latitude = position['coords']['latitude'].toDouble();
+    double longitude = position['coords']['longitude'].toDouble();
+
+    print('Latitude: $latitude, Longitude: $longitude');
+    setState(() {
+      this.latitude = latitude;
+      this.longitude = longitude;
+    });
   }
 
   Future<bool> _canAskLocation(Location location) async {
