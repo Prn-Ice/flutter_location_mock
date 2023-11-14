@@ -1,9 +1,14 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:location/location.dart';
-import /* 'web_location.dart' if(dart.library.html)  */ 'dart:js' as js;
+import 'package:geolocator/geolocator.dart' as gl;
+import 'package:location/location.dart' as l;
+// ignore: avoid_web_libraries_in_flutter
+import 'dart:js' as js;
+
+enum LocationOption { js, location, geoLocator }
+
+enum LocationAccuracy { high, low }
 
 void main() {
   runApp(const MyApp());
@@ -38,8 +43,12 @@ class _MyHomePageState extends State<MyHomePage> {
   double? latitude;
   double? longitude;
   bool watching = false;
+  bool checkPermission = true;
+  bool fetchingLocation = false;
+  LocationOption locationOption = LocationOption.js;
+  LocationAccuracy locationAccuracy = LocationAccuracy.high;
 
-  final locationService = Location();
+  final locationService = l.Location();
 
   @override
   Widget build(BuildContext context) {
@@ -48,94 +57,302 @@ class _MyHomePageState extends State<MyHomePage> {
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         title: Text(widget.title),
       ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text('Latitude:'),
-                Text(
-                  latitude != null ? latitude.toString() : '',
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
-              ],
-            ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text('Longitude:'),
-                Text(
-                  longitude != null ? longitude.toString() : '',
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                ElevatedButton(
-                  onPressed: () async {
-                    /* final location = await _determinePosition(locationService);
-                    print('position is $location');
-                    setState(() {
-                      latitude = location.latitude;
-                      longitude = location.longitude;
-                    }); */
-
-                    fetchLocation();
-                  },
-                  child: const Text('Get Location'),
-                ),
-                const SizedBox(width: 20),
-                ElevatedButton(
-                  onPressed: watching
-                      ? null
-                      : () async {
-                          setState(() {
-                            watching = true;
-                          });
-
-                          final canAskLocation = await _canAskLocation(
-                            locationService,
-                          );
-
-                          if (!canAskLocation) {
-                            // ignore: use_build_context_synchronously
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content:
-                                    Text('Location permissions are denied'),
-                              ),
-                            );
-                            return Future.error(
-                              'Location permissions are denied',
-                            );
-                          }
-
-                          locationService.onLocationChanged
-                              .listen((LocationData position) {
-                            print('position is $position');
+      body: Stack(
+        children: [
+          Center(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: <Widget>[
+                const Flexible(child: SizedBox(width: 128)),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('Check permission: '),
+                        const SizedBox(width: 20),
+                        Switch(
+                          value: checkPermission,
+                          onChanged: (value) {
                             setState(() {
-                              latitude = position.latitude;
-                              longitude = position.longitude;
+                              checkPermission = value;
                             });
-                          });
-                        },
-                  child: const Text('Watch Location'),
+                          },
+                        ),
+                      ],
+                    ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('Location option: '),
+                        const SizedBox(width: 20),
+                        DropdownButton<LocationOption>(
+                          value: locationOption,
+                          onChanged: (LocationOption? newValue) {
+                            setState(() {
+                              if (newValue != null) {
+                                locationOption = newValue;
+                              }
+                            });
+                          },
+                          items: LocationOption.values
+                              .map<DropdownMenuItem<LocationOption>>((value) {
+                            return DropdownMenuItem<LocationOption>(
+                              value: value,
+                              child: Text(value.name.toUpperCase()),
+                            );
+                          }).toList(),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('Location accuracy: '),
+                        const SizedBox(width: 20),
+                        DropdownButton<LocationAccuracy>(
+                          value: locationAccuracy,
+                          onChanged: (LocationAccuracy? newValue) {
+                            setState(() {
+                              if (newValue != null) {
+                                locationAccuracy = newValue;
+                              }
+                            });
+                          },
+                          items: LocationAccuracy.values
+                              .map<DropdownMenuItem<LocationAccuracy>>((value) {
+                            return DropdownMenuItem<LocationAccuracy>(
+                              value: value,
+                              child: Text(value.name.toUpperCase()),
+                            );
+                          }).toList(),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Text('Latitude:'),
+                        Text(
+                          latitude != null ? latitude.toString() : '',
+                          style: Theme.of(context).textTheme.headlineMedium,
+                        ),
+                      ],
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Text('Longitude:'),
+                        Text(
+                          longitude != null ? longitude.toString() : '',
+                          style: Theme.of(context).textTheme.headlineMedium,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        ElevatedButton(
+                          onPressed: () {
+                            print(locationOption);
+                            switch (locationOption) {
+                              case LocationOption.js:
+                                fetchLocationJS();
+                                break;
+                              case LocationOption.location:
+                                fetchLocationLocation(
+                                  accuracy: locationAccuracy,
+                                  checkPermission: checkPermission,
+                                );
+                                break;
+                              case LocationOption.geoLocator:
+                                fetchLocationGeoLocator(
+                                  accuracy: locationAccuracy,
+                                  checkPermission: checkPermission,
+                                );
+                                break;
+                            }
+                          },
+                          child: const Text('Get Location'),
+                        ),
+                        const SizedBox(width: 20),
+                        ElevatedButton(
+                          onPressed: watching
+                              ? null
+                              : () {
+                                  switch (locationOption) {
+                                    case LocationOption.js:
+                                      break;
+                                    case LocationOption.location:
+                                      watchLocationLocation(locationAccuracy);
+                                      break;
+                                    case LocationOption.geoLocator:
+                                      watchLocationGeoLocator(locationAccuracy);
+                                      break;
+                                  }
+                                },
+                          child: const Text('Watch Location'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                const Flexible(child: SizedBox(width: 128)),
               ],
             ),
-          ],
-        ),
+          ),
+          if (fetchingLocation)
+            Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Theme.of(context).colorScheme.primary.withOpacity(0.8),
+                    Theme.of(context).colorScheme.secondary.withOpacity(0.8),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+              ),
+            ),
+          if (fetchingLocation)
+            const Center(child: CircularProgressIndicator()),
+        ],
       ),
     );
   }
 
+  Future<void> fetchLocationLocation({
+    required LocationAccuracy accuracy,
+    required bool checkPermission,
+  }) async {
+    gl.LocationPermission permission;
+
+    if (checkPermission) {
+      permission = await gl.Geolocator.checkPermission();
+      if (permission == gl.LocationPermission.denied) {
+        permission = await gl.Geolocator.requestPermission();
+        if (permission == gl.LocationPermission.denied) {
+          // Permissions are denied, next time you could try
+          // requesting permissions again (this is also where
+          // Android's shouldShowRequestPermissionRationale
+          // returned true. According to Android guidelines
+          // your App should show an explanatory UI now.
+          return Future.error('Location permissions are denied');
+        }
+      }
+
+      if (permission == gl.LocationPermission.deniedForever) {
+        // Permissions are denied forever, handle appropriately.
+        return Future.error(
+            'Location permissions are permanently denied, we cannot request permissions.');
+      }
+    }
+
+    setState(() {
+      fetchingLocation = true;
+    });
+
+    // When we reach here, permissions are granted and we can
+    // continue accessing the position of the device.
+    final location = await locationService.getLocation();
+    print('LOC - Location is ${location.latitude} ${location.longitude}');
+    setState(() {
+      latitude = location.latitude;
+      longitude = location.longitude;
+      fetchingLocation = false;
+    });
+  }
+
+  Future<void> fetchLocationGeoLocator({
+    required LocationAccuracy accuracy,
+    required bool checkPermission,
+  }) async {
+    try {
+      if (checkPermission) {
+        l.PermissionStatus permissionGranted;
+
+        permissionGranted = await locationService.hasPermission();
+        if (permissionGranted == l.PermissionStatus.denied) {
+          permissionGranted = await locationService.requestPermission();
+          if (permissionGranted != l.PermissionStatus.granted) {
+            return;
+          }
+        }
+      }
+
+      setState(() {
+        fetchingLocation = true;
+      });
+
+      final location = await gl.Geolocator.getCurrentPosition(
+        desiredAccuracy: accuracy == LocationAccuracy.high
+            ? gl.LocationAccuracy.best
+            : gl.LocationAccuracy.low,
+        timeLimit: const Duration(seconds: 1200),
+      );
+      print('GEO - Location is ${location.latitude} ${location.longitude}');
+      setState(() {
+        latitude = location.latitude;
+        longitude = location.longitude;
+        fetchingLocation = false;
+      });
+    } catch (e) {
+      print(e);
+    }
+  }
+
+  Future<void> watchLocationLocation(LocationAccuracy accuracy) async {
+    setState(() {
+      watching = true;
+    });
+
+    await locationService.changeSettings(
+      accuracy: accuracy == LocationAccuracy.high
+          ? l.LocationAccuracy.high
+          : l.LocationAccuracy.low,
+    );
+
+    locationService.onLocationChanged.listen((l.LocationData position) {
+      print('position is $position');
+      setState(() {
+        latitude = position.latitude;
+        longitude = position.longitude;
+      });
+    });
+  }
+
+  void watchLocationGeoLocator(LocationAccuracy accuracy) async {
+    setState(() {
+      watching = true;
+    });
+
+    gl.Geolocator.getPositionStream(
+            locationSettings: gl.LocationSettings(
+                accuracy: accuracy == LocationAccuracy.high
+                    ? gl.LocationAccuracy.high
+                    : gl.LocationAccuracy.low,
+                timeLimit: const Duration(seconds: 1200)))
+        .listen((gl.Position position) {
+      print('position is $position');
+      setState(() {
+        latitude = position.latitude;
+        longitude = position.longitude;
+      });
+    });
+  }
+
   // Function to call JavaScript from Dart
-  void fetchLocation() {
+  void fetchLocationJS() {
     // Define a callback function to handle the location from JavaScript
     js.context['receiveLocationFromJS'] = (position) {
       // Handle the location received from JavaScript
@@ -152,56 +369,10 @@ class _MyHomePageState extends State<MyHomePage> {
     double latitude = position['coords']['latitude'].toDouble();
     double longitude = position['coords']['longitude'].toDouble();
 
-    print('Latitude: $latitude, Longitude: $longitude');
+    print('JS - Latitude: $latitude, Longitude: $longitude');
     setState(() {
       this.latitude = latitude;
       this.longitude = longitude;
     });
-  }
-
-  Future<bool> _canAskLocation(Location location) async {
-    bool serviceEnabled;
-    PermissionStatus permissionGranted;
-
-    serviceEnabled = await location.serviceEnabled();
-    if (!serviceEnabled) {
-      serviceEnabled = await location.requestService();
-      if (!serviceEnabled) {
-        return false;
-      }
-    }
-
-    permissionGranted = await location.hasPermission();
-    if (permissionGranted == PermissionStatus.denied) {
-      permissionGranted = await location.requestPermission();
-      if (permissionGranted != PermissionStatus.granted) {
-        return false;
-      }
-    }
-
-    return permissionGranted == PermissionStatus.granted ||
-        permissionGranted == PermissionStatus.grantedLimited;
-  }
-
-  /// Determine the current position of the device.
-  ///
-  /// When the location services are not enabled or permissions
-  /// are denied the `Future` will return an error.
-  Future<LocationData> _determinePosition(Location location) async {
-    final canAskLocation = await _canAskLocation(location);
-
-    if (!canAskLocation) {
-      // ignore: use_build_context_synchronously
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Location permissions are denied'),
-        ),
-      );
-      return Future.error('Location permissions are denied');
-    }
-
-    // When we reach here, permissions are granted and we can
-    // continue accessing the position of the device.
-    return await location.getLocation();
   }
 }
